@@ -1,0 +1,6 @@
+{
+  "name": "Sistema de Cobros — Detektor",
+  "description": "Sistema de cobros y emisión de recibos personalizados para servicios y productos, integrado con AWS DynamoDB.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
