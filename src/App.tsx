@@ -875,7 +875,7 @@ export default function App() {
         </head>
         <body>
           <div class="ticket-body">
-            \${rawHtml}
+            ${rawHtml}
           </div>
           <script>
             function triggerPrint() {
