@@ -30,10 +30,22 @@ app.use(express.json({ limit: "15mb" }));
 
 // Helper to resolve temporary dynamic credentials from headers
 function getCredentialsFromHeaders(req: express.Request) {
-  const accessKeyId = req.headers["x-aws-access-key-id"] as string;
-  const secretAccessKey = req.headers["x-aws-secret-access-key"] as string;
-  const sessionToken = req.headers["x-aws-session-token"] as string;
-  const tenantId = req.headers["x-tenant-id"] as string;
+  let accessKeyId = req.headers["x-aws-access-key-id"] as string;
+  let secretAccessKey = req.headers["x-aws-secret-access-key"] as string;
+  let sessionToken = req.headers["x-aws-session-token"] as string;
+  let tenantId = req.headers["x-tenant-id"] as string;
+
+  const clean = (val: string | undefined | null) => {
+    if (!val) return undefined;
+    const s = String(val).trim();
+    if (s === "" || s === "undefined" || s === "null") return undefined;
+    return s;
+  };
+
+  accessKeyId = clean(accessKeyId) as string;
+  secretAccessKey = clean(secretAccessKey) as string;
+  sessionToken = clean(sessionToken) as string;
+  tenantId = clean(tenantId) as string;
 
   if (accessKeyId && secretAccessKey) {
     return {
@@ -46,8 +58,8 @@ function getCredentialsFromHeaders(req: express.Request) {
   // Fall back to tenantId-only configuration if static AWS keys are active in servers env
   if (tenantId) {
     return {
-      accessKeyId: process.env.AWS_ACCESS_KEY_ID || "",
-      secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY || "",
+      accessKeyId: clean(process.env.AWS_ACCESS_KEY_ID) || "",
+      secretAccessKey: clean(process.env.AWS_SECRET_ACCESS_KEY) || "",
       tenantId
     };
   }
@@ -87,6 +99,17 @@ app.post("/api/login", async (req, res) => {
     if (!response.ok) {
       return res.status(response.status).json(body);
     }
+
+    console.log("🔐 Autenticación exitosa. Estructura de respuesta de Amazon API Gateway:", {
+      status: response.status,
+      keys: Object.keys(body),
+      hasAccessKey: !!(body.accessKeyId || body.AccessKeyId || body.accesskeyid),
+      hasSecretKey: !!(body.secretAccessKey || body.SecretAccessKey || body.secretaccesskey),
+      hasSessionToken: !!(body.sessionToken || body.SessionToken || body.sessiontoken),
+      hasJwt: !!(body.jwt || body.Jwt || body.token || body.Token),
+      tenantId: tenantId
+    });
+
     res.json(body);
   } catch (error: any) {
     res.status(500).json({ error: error.message || "Error al contactar el servidor de autenticación" });

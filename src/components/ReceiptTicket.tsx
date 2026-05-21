@@ -14,6 +14,21 @@ export const ReceiptTicket: React.FC<ReceiptTicketProps> = ({
   selectedFecha,
   empresa,
 }) => {
+  // Helper to format raw Base64 logo to Data URI safely
+  const getLogoSrc = (logo?: string): string => {
+    if (!logo) return "";
+    const trimmed = logo.trim();
+    if (
+      trimmed.startsWith("data:") ||
+      trimmed.startsWith("http://") ||
+      trimmed.startsWith("https://") ||
+      trimmed.startsWith("/")
+    ) {
+      return trimmed;
+    }
+    return `data:image/png;base64,${trimmed}`;
+  };
+
   // Helper to format date
   const fmtDate = (s?: string) => {
     if (!s) return "—";
@@ -39,7 +54,7 @@ export const ReceiptTicket: React.FC<ReceiptTicketProps> = ({
             {empresa.logo && (
               <div style={{ marginBottom: "6px" }}>
                 <img
-                  src={empresa.logo}
+                  src={getLogoSrc(empresa.logo)}
                   style={{ maxHeight: "55px", maxWidth: "160px", margin: "0 auto", objectFit: "contain", filter: "grayscale(100%) contrast(140%)" }}
                   alt="Logo"
                 />
@@ -200,7 +215,7 @@ export const ReceiptTicket: React.FC<ReceiptTicketProps> = ({
             {empresa.logo && (
               <div style={{ marginBottom: "6px" }}>
                 <img
-                  src={empresa.logo}
+                  src={getLogoSrc(empresa.logo)}
                   style={{ maxHeight: "55px", maxWidth: "160px", margin: "0 auto", objectFit: "contain", filter: "grayscale(100%) contrast(140%)" }}
                   alt="Logo"
                 />

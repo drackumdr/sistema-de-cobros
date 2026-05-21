@@ -1,0 +1,140 @@
+{
+  "clientes": [
+    {
+      "id": "demo-cliente-1",
+      "cuenta": "SEC-1001",
+      "nombre": "Juan Pérez García (Demo)",
+      "tel": "6141234567",
+      "contactoNombre": "Juan Pérez García",
+      "contactoCel": "6141234567",
+      "email": "juan.perez@ejemplo.com",
+      "rfc": "PEGJ800101XXX",
+      "dir": "Av. de las Industrias #1230, Chihuahua, Chih.",
+      "freq": "mensual",
+      "monto": 350,
+      "descuento": 0,
+      "servicio": "Monitoreo de Alarma Residencial",
+      "desc": "Panel DSC Neo y Sensor de Apertura",
+      "inicio": "2026-01-10",
+      "proximoCobro": "2026-06-10",
+      "notas": "Pagar con transferencia bancaria los primeros 10 días.",
+      "estado": "activo",
+      "pagos": [
+        {
+          "id": "demo-pago-1",
+          "fecha": "2026-05-10",
+          "monto": 350,
+          "recibo": "REC-948210",
+          "periodoDesde": "2026-05-10",
+          "periodoHasta": "2026-06-09"
+        }
+      ]
+    },
+    {
+      "id": "demo-cliente-2",
+      "cuenta": "SEC-1002",
+      "nombre": "Corporativo Detektor (Demo)",
+      "tel": "6149876543",
+      "contactoNombre": "Soporte Central",
+      "contactoCel": "6149876543",
+      "email": "corporativo@detektor.mx",
+      "rfc": "DET123456XX0",
+      "dir": "Periférico de la Juventud #4400, Plaza Sphera",
+      "freq": "anual",
+      "monto": 1500,
+      "descuento": 10,
+      "servicio": "Localización GPS Monitoreada",
+      "desc": "2x Dispositivos GPS Vehicular con corte de motor",
+      "inicio": "2025-05-20",
+      "proximoCobro": "2026-05-20",
+      "notas": "Requiere factura electrónica con IVA desglosado.",
+      "estado": "activo",
+      "pagos": []
+    }
+  ],
+  "config": [
+    {
+      "key": "empresa",
+      "value": {
+        "nombre": "Detektor Seguridad Profesional",
+        "rfc": "DET123456XX0",
+        "dir": "Periférico de la Juventud #4400, Chihuahua, CP 31120",
+        "logo": ""
+      }
+    },
+    {
+      "key": "servicios",
+      "value": [
+        {
+          "nombre": "Monitoreo de Alarma Residencial",
+          "desc": "Monitoreo 24/7 GPRS/IP",
+          "freq": "mensual",
+          "monto": 300
+        },
+        {
+          "nombre": "Monitoreo de Alarma Residencial con Comodato",
+          "desc": "Incluye modulo WiFi",
+          "freq": "mensual",
+          "monto": 350
+        },
+        {
+          "nombre": "Localización Gps Vehicular",
+          "desc": "Plataforma de rastreo premium",
+          "freq": "mensual",
+          "monto": 180
+        },
+        {
+          "nombre": "Mantenimiento Técnico Preventivo",
+          "desc": "Limpieza y cambio de baterias anual",
+          "freq": "anual",
+          "monto": 850
+        }
+      ]
+    },
+    {
+      "key": "seq",
+      "value": 1002
+    }
+  ],
+  "recibos": [
+    {
+      "id": "demo-recibo-1",
+      "numeroRecibo": "RECP-0001",
+      "fecha": "2026-05-20",
+      "clienteNombre": "Juan Pérez García",
+      "clienteTel": "6141234567",
+      "items": [
+        {
+          "tipo": "producto",
+          "nombre": "Sensor Infrarrojo de Movimiento Premium",
+          "monto": 450,
+          "cantidad": 2
+        },
+        {
+          "tipo": "servicio",
+          "nombre": "Instalación y Configuración Técnica",
+          "monto": 300,
+          "cantidad": 1
+        }
+      ],
+      "subtotal": 1200,
+      "descuentoGlobal": 0,
+      "ivaPercent": 16,
+      "total": 1392,
+      "metodoPago": "efectivo",
+      "notas": "Venta directa de equipo al cliente."
+    }
+  ],
+  "pagos": [
+    {
+      "id": "demo-pago-1",
+      "clienteId": "demo-cliente-1",
+      "clienteNombre": "Juan Pérez García (Demo)",
+      "fecha": "2026-05-10",
+      "monto": 350,
+      "recibo": "REC-948210",
+      "periodoDesde": "2026-05-10",
+      "periodoHasta": "2026-06-09"
+    }
+  ]
+}

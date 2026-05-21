@@ -6,7 +6,20 @@ import dotenv from "dotenv";
 
 dotenv.config();
 
-const FALLBACK_FILE = path.resolve("db_local_fallback.json");
+const FALLBACK_FILE = (() => {
+  const localFile = path.resolve("db_local_fallback.json");
+  const tmpFile = "/tmp/db_local_fallback.json";
+  try {
+    // Check if we can write to the current directory
+    const testFile = path.resolve("test_write.tmp");
+    fs.writeFileSync(testFile, "test");
+    fs.unlinkSync(testFile);
+    return localFile;
+  } catch (e) {
+    console.log("⚠️ Active directory is read-only. Fallback DB configured to write securely inside /tmp.");
+    return tmpFile;
+  }
+})();
 
 // Define schema interfaces
 export interface AWSCredentials {
@@ -97,6 +110,7 @@ let dynamoDbClient: DynamoDBClient | null = null;
 let docClient: DynamoDBDocumentClient | null = null;
 let useLocalFallback = true;
 let awsConnectionError: string | null = null;
+export let lastRuntimeError: string | null = null;
 
 const TABLE_CLIENTES = "ThunderShieldBackend-Clients";
 const TABLE_CONTACTOS = "ThunderShieldBackend-ClientContacts";
@@ -146,14 +160,25 @@ function initDynamoClient(): DynamoDBDocumentClient {
 
 // Dynamic Client Provider incorporating temporary AWS security tokens
 export function getDynamoDocClient(credentials?: AWSCredentials): DynamoDBDocumentClient | null {
-  if (credentials && credentials.accessKeyId && credentials.secretAccessKey) {
+  const clean = (val: any) => {
+    if (!val) return undefined;
+    const s = String(val).trim();
+    if (s === "" || s === "undefined" || s === "null") return undefined;
+    return s;
+  };
+
+  const accessKeyId = clean(credentials?.accessKeyId);
+  const secretAccessKey = clean(credentials?.secretAccessKey);
+  const sessionToken = clean(credentials?.sessionToken);
+
+  if (accessKeyId && secretAccessKey) {
     try {
       const client = new DynamoDBClient({
-        region: credentials.region || process.env.AWS_REGION || "us-east-1",
+        region: credentials?.region || process.env.AWS_REGION || "us-east-1",
         credentials: {
-          accessKeyId: credentials.accessKeyId,
-          secretAccessKey: credentials.secretAccessKey,
-          sessionToken: credentials.sessionToken,
+          accessKeyId,
+          secretAccessKey,
+          sessionToken,
         },
       });
       return DynamoDBDocumentClient.from(client, {
@@ -182,6 +207,18 @@ const getPartitionedKey = (key: string, tenantId?: string) => {
 // Ensure the local fallback DB exists
 function ensureLocalDbFile() {
   if (!fs.existsSync(FALLBACK_FILE)) {
+    // If the active fallback path is /tmp but a package db file exists, seed it by copy
+    const localTemplate = path.resolve("db_local_fallback.json");
+    if (FALLBACK_FILE === "/tmp/db_local_fallback.json" && fs.existsSync(localTemplate)) {
+      try {
+        fs.copyFileSync(localTemplate, FALLBACK_FILE);
+        console.log("📋 Successfully seeded /tmp/db_local_fallback.json from read-only package template database.");
+        return;
+      } catch (err) {
+        console.error("⚠️ Failed to copy read-only database package file to /tmp:", err);
+      }
+    }
+
     const defaultData = {
       clientes: [
         {
@@ -500,21 +537,29 @@ export async function getClientes(credentials?: AWSCredentials): Promise<Cliente
   }
 
   try {
-    return await executeGetClientes(customDocClient, tenantId, credentials);
+    const resultList = await executeGetClientes(customDocClient, tenantId, credentials);
+    lastRuntimeError = null; // Clear error on successful DynamoDB fetch
+    return resultList;
   } catch (error: any) {
+    const errorMsg = error.message || String(error);
+    lastRuntimeError = `Error leyendo clientes (DynamoDB): ${errorMsg} (${error.name || "Error"})`;
+    console.error("❌ Scan ThunderShieldBackend-Clients failed:", error);
+
     const isSecurityError = error.name === "UnrecognizedClientException" || error.message?.includes("security token") || error.message?.includes("expired");
     if (isSecurityError && credentials) {
       console.warn("⚠️ Temp credentials expired or invalid. Retrying getClientes with static system credentials...");
       const staticDocClient = getDynamoDocClient(undefined);
       if (staticDocClient) {
         try {
-          return await executeGetClientes(staticDocClient, tenantId, { tenantId });
-        } catch (retryError) {
+          const retriedData = await executeGetClientes(staticDocClient, tenantId, { tenantId });
+          lastRuntimeError = null; // Clear if static credentials retry succeeds
+          return retriedData;
+        } catch (retryError: any) {
           console.error("❌ Retry with static credentials failed for getClientes:", retryError);
+          lastRuntimeError = `Error en reintento estático: ${retryError.message}`;
         }
       }
     }
-    console.warn("⚠️ Scan ThunderShieldBackend-Clients failed, using local backup. Error:", error);
     const local = readLocalDb().clientes;
     if (tenantId) {
       return local.filter(c => c.tenantId === tenantId);
@@ -1270,18 +1315,18 @@ export async function deletePago(id: string, credentials?: AWSCredentials): Prom
 
 // Check database status
 export function getDbStatus(credentials?: AWSCredentials): { mode: "dynamo" | "local"; error: string | null; fallbackFile: string } {
-  // If dynamic credentials succeeded, we're in dynamo mode
+  // If dynamic credentials succeeded, we're in dynamo mode unless we hit a runtime error
   if (credentials && credentials.accessKeyId && credentials.secretAccessKey) {
     return {
-      mode: "dynamo",
-      error: null,
+      mode: lastRuntimeError ? "local" : "dynamo",
+      error: lastRuntimeError,
       fallbackFile: FALLBACK_FILE
     };
   }
 
   return {
-    mode: useLocalFallback ? "local" : "dynamo",
-    error: awsConnectionError,
+    mode: (useLocalFallback || lastRuntimeError) ? "local" : "dynamo",
+    error: awsConnectionError || lastRuntimeError,
     fallbackFile: FALLBACK_FILE,
   };
 }

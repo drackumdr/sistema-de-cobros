@@ -8,11 +8,23 @@ export const FREQ_LABELS = {
   anual: "Anual"
 };
 
-// Parse 'YYYY-MM-DD' into a local Date object safely
+// Parse date strings safely supporting YYYY-MM-DD, DD/MM/YYYY, and dash or slash separators
 export function parseDate(s: string): Date {
   if (!s) return new Date();
-  const [y, m, d] = s.split("-").map(Number);
-  if (isNaN(y) || isNaN(m) || isNaN(d)) return new Date();
+  const clean = s.replace(/\//g, "-").trim();
+  const parts = clean.split("-").map(Number);
+  if (parts.length < 3 || parts.some(isNaN)) return new Date();
+  
+  // Rule of thumb: if the first part is 1 or 2 digits, treat as DD-MM-YYYY
+  if (parts[0] < 100) {
+    const d = parts[0];
+    const m = parts[1];
+    const y = parts[2] < 100 ? 2000 + parts[2] : parts[2];
+    return new Date(y, m - 1, d);
+  }
+  
+  // Otherwise assume standard YYYY-MM-DD
+  const [y, m, d] = parts;
   return new Date(y, m - 1, d);
 }
 

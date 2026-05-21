@@ -51,11 +51,18 @@ export class ApiClient {
    * Generates authorization and AWS credentials proxy headers for our local node express API
    */
   static getAuthHeaders(): Record<string, string> {
-    const jwt = localStorage.getItem("detektor_jwt") || "";
-    const tenantId = localStorage.getItem("detektor_tenant_id") || "";
-    const accessKeyId = localStorage.getItem("detektor_aws_access_key_id") || "";
-    const secretAccessKey = localStorage.getItem("detektor_aws_secret_access_key") || "";
-    const sessionToken = localStorage.getItem("detektor_aws_session_token") || "";
+    const sanitize = (val: string | null) => {
+      if (!val) return "";
+      const s = val.trim();
+      if (s === "undefined" || s === "null" || s === "") return "";
+      return s;
+    };
+
+    const jwt = sanitize(localStorage.getItem("detektor_jwt"));
+    const tenantId = sanitize(localStorage.getItem("detektor_tenant_id"));
+    const accessKeyId = sanitize(localStorage.getItem("detektor_aws_access_key_id"));
+    const secretAccessKey = sanitize(localStorage.getItem("detektor_aws_secret_access_key"));
+    const sessionToken = sanitize(localStorage.getItem("detektor_aws_session_token"));
 
     const headers: Record<string, string> = {
       "Content-Type": "application/json"

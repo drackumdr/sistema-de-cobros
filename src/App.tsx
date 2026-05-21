@@ -27,7 +27,8 @@ import {
   FileSpreadsheet,
   X,
   CreditCard,
-  MessageSquare
+  MessageSquare,
+  Menu
 } from "lucide-react";
 import { Cliente, Pago, Contacto, ReciboPersonalizado, EmpresaData, ServicioPredefinido } from "./types";
 import {
@@ -75,6 +76,7 @@ export default function App() {
   
   // Loading & Sync states
   const [isSyncing, setIsSyncing] = useState(false);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [toastMsg, setToastMsg] = useState("");
   const [fontSize, setFontSize] = useState(15);
 
@@ -218,36 +220,69 @@ export default function App() {
     try {
       const result = await ApiClient.login(loginTenantId, loginUsername, loginPassword);
       
+      // Helper to map and sanitize fields (supports both flat/nested, pascalCase and camelCase keys from AWS STS return payload)
+      const sanitize = (val: any) => {
+        if (!val) return "";
+        const s = String(val).trim();
+        if (s === "undefined" || s === "null" || s === "") return "";
+        return s;
+      };
+
+      const extractField = (path: string): string => {
+        const cap = path.charAt(0).toUpperCase() + path.slice(1);
+        if ((result as any)[path] !== undefined) return sanitize((result as any)[path]);
+        if ((result as any)[cap] !== undefined) return sanitize((result as any)[cap]);
+
+        const nestedProps = ["credentials", "Credentials", "awsCredentials", "AwsCredentials"];
+        for (const parent of nestedProps) {
+          const parentObj = (result as any)[parent];
+          if (parentObj && typeof parentObj === "object") {
+            if (parentObj[path] !== undefined) return sanitize(parentObj[path]);
+            if (parentObj[cap] !== undefined) return sanitize(parentObj[cap]);
+          }
+        }
+        return "";
+      };
+
+      const jwt = sanitize(result.jwt || (result as any).Jwt || (result as any).token || (result as any).Token);
+      const tenantApiKey = sanitize(result.tenantApiKey || (result as any).TenantApiKey);
+      const name = sanitize(result.name || (result as any).Name) || "Usuario";
+      const role = sanitize(result.role || (result as any).Role) || "Operador";
+      const userId = sanitize(result.userId || (result as any).UserId);
+      const accessKeyId = extractField("accessKeyId");
+      const secretAccessKey = extractField("secretAccessKey");
+      const sessionToken = extractField("sessionToken");
+
       // Save returning session variables in localStorage
-      localStorage.setItem("detektor_jwt", result.jwt);
-      localStorage.setItem("detektor_tenant_api_key", result.tenantApiKey);
-      localStorage.setItem("detektor_name", result.name);
-      localStorage.setItem("detektor_role", result.role);
-      localStorage.setItem("detektor_user_id", result.userId);
-      localStorage.setItem("detektor_aws_access_key_id", result.accessKeyId);
-      localStorage.setItem("detektor_aws_secret_access_key", result.secretAccessKey);
-      localStorage.setItem("detektor_aws_session_token", result.sessionToken);
+      localStorage.setItem("detektor_jwt", jwt);
+      localStorage.setItem("detektor_tenant_api_key", tenantApiKey);
+      localStorage.setItem("detektor_name", name);
+      localStorage.setItem("detektor_role", role);
+      localStorage.setItem("detektor_user_id", userId);
+      localStorage.setItem("detektor_aws_access_key_id", accessKeyId);
+      localStorage.setItem("detektor_aws_secret_access_key", secretAccessKey);
+      localStorage.setItem("detektor_aws_session_token", sessionToken);
       localStorage.setItem("detektor_tenant_id", loginTenantId);
       localStorage.setItem("remembered_tenant_id", loginTenantId);
       localStorage.setItem("remembered_username", loginUsername);
 
       setIsAuthenticated(true);
       setUserMetadata({
-        name: result.name,
-        role: result.role,
+        name: name,
+        role: role,
         tenantId: loginTenantId,
-        userId: result.userId
+        userId: userId
       });
-      triggerToast(`✓ Bienvenido ${result.name}!`);
+      triggerToast(`✓ Bienvenido ${name}!`);
 
       // Trigger automatic DB setup on target AWS credential account
       const authHeaders = {
         "Content-Type": "application/json",
-        "Authorization": `Bearer ${result.jwt}`,
+        "Authorization": `Bearer ${jwt}`,
         "X-Tenant-Id": loginTenantId,
-        "X-AWS-Access-Key-Id": result.accessKeyId,
-        "X-AWS-Secret-Access-Key": result.secretAccessKey,
-        "X-AWS-Session-Token": result.sessionToken
+        "X-AWS-Access-Key-Id": accessKeyId,
+        "X-AWS-Secret-Access-Key": secretAccessKey,
+        "X-AWS-Session-Token": sessionToken
       };
       await fetch("/api/setup", {
         method: "POST",
@@ -501,6 +536,79 @@ export default function App() {
     window.open(`https://wa.me/${tel}?text=${encodeURIComponent(msg)}`, "_blank");
   };
 
+  // Helper to format raw Base64 logo to Data URI safely
+  const getLogoSrc = (logo?: string): string => {
+    if (!logo) return "";
+    const trimmed = logo.trim();
+    if (
+      trimmed.startsWith("data:") ||
+      trimmed.startsWith("http://") ||
+      trimmed.startsWith("https://") ||
+      trimmed.startsWith("/")
+    ) {
+      return trimmed;
+    }
+    return `data:image/png;base64,${trimmed}`;
+  };
+
+  // Helper to convert OKLCH values to RGB/RGBA string formats that html2canvas supports
+  const oklchToRgb = (l: number, c: number, hDeg: number, alphaStr?: string): string => {
+    const h = (hDeg * Math.PI) / 180;
+    const a = c * Math.cos(h);
+    const b = c * Math.sin(h);
+
+    const l_l = l + 0.3963377774 * a + 0.2158037573 * b;
+    const m_l = l - 0.1055613458 * a - 0.0638541728 * b;
+    const s_l = l - 0.0894841775 * a - 1.2914855480 * b;
+
+    const l3 = l_l * l_l * l_l;
+    const m3 = m_l * m_l * m_l;
+    const s3 = s_l * s_l * s_l;
+
+    const r_lin = +4.0767416621 * l3 - 3.3077115913 * m3 + 0.2309699292 * s3;
+    const g_lin = -1.2684380046 * l3 + 2.6097574011 * m3 - 0.3413193965 * s3;
+    const b_lin = -0.0041960863 * l3 - 0.7034186147 * m3 + 1.7076147010 * s3;
+
+    const gamma = (val: number) => {
+      const v = val < 0 ? 0 : val > 1 ? 1 : val;
+      return v <= 0.0031308 ? 12.92 * v : 1.055 * Math.pow(v, 1 / 2.4) - 0.055;
+    };
+
+    const r = Math.round(gamma(r_lin) * 255);
+    const g = Math.round(gamma(g_lin) * 255);
+    const bVal = Math.round(gamma(b_lin) * 255);
+
+    let alpha = 1;
+    if (alphaStr) {
+      const trimmed = alphaStr.trim();
+      if (trimmed.endsWith("%")) {
+        alpha = parseFloat(trimmed) / 100;
+      } else {
+        alpha = parseFloat(trimmed);
+      }
+    }
+
+    if (alpha === 1) {
+      return `rgb(${r}, ${g}, ${bVal})`;
+    } else {
+      return `rgba(${r}, ${g}, ${bVal}, ${alpha})`;
+    }
+  };
+
+  const replaceOklchInString = (str: string): string => {
+    if (!str || typeof str !== "string") return str;
+    if (!str.toLowerCase().includes("oklch")) return str;
+
+    const oklchRegex = /oklch\s*\(\s*([\d.]+)\s+([\d.]+)\s+([\d.]+)(?:\s*[\/]\s*([\d.%]+))?\s*\)/gi;
+    return str.replace(oklchRegex, (match, l, c, h, a) => {
+      try {
+        return oklchToRgb(parseFloat(l), parseFloat(c), parseFloat(h), a);
+      } catch {
+        return "rgb(120, 120, 120)";
+      }
+    });
+  };
+
   // Sharing PDF on WhatsApp or other media
   const handleShareReceiptOnWhatsApp = async () => {
     const targetElement = document.getElementById("receipt-ticket-print-panel");
@@ -513,23 +621,56 @@ export default function App() {
       return;
     }
 
-    // Temporary monkey-patch on CSSStyleSheet prototype to strip out 'oklch' color functions.
+    // Temporary monkey-patch on window.getComputedStyle, CSSStyleSheet, and CSSGroupingRule prototype to strip out 'oklch' color functions.
     // html2canvas parses stylesheet rules and throws an error if it encounters modern colors (oklch) introduced in Tailwind v4.
+    const originalGetComputedStyle = window.getComputedStyle;
     const originalCssRules = Object.getOwnPropertyDescriptor(CSSStyleSheet.prototype, "cssRules");
     const originalRules = Object.getOwnPropertyDescriptor(CSSStyleSheet.prototype, "rules");
+    const originalGroupingRules = typeof CSSGroupingRule !== "undefined" ? Object.getOwnPropertyDescriptor(CSSGroupingRule.prototype, "cssRules") : null;
+    const originalKeyframesRules = typeof CSSKeyframesRule !== "undefined" ? Object.getOwnPropertyDescriptor(CSSKeyframesRule.prototype, "cssRules") : null;
+
+    const filterRules = (rules: any) => {
+      if (!rules) return rules;
+      try {
+        const filtered = Array.from(rules).filter((rule: any) => {
+          const text = rule.cssText || "";
+          return !text.includes("oklch") && !text.includes("OKLCH");
+        });
+        (filtered as any).item = (idx: number) => filtered[idx];
+        return filtered as any;
+      } catch (e) {
+        return rules;
+      }
+    };
 
     try {
+      window.getComputedStyle = function (el, pseudoElt) {
+        const style = originalGetComputedStyle.call(window, el, pseudoElt);
+        return new Proxy(style, {
+          get(target, prop, receiver) {
+            if (prop === "getPropertyValue") {
+              return function (propertyName: string) {
+                const val = target.getPropertyValue(propertyName);
+                return replaceOklchInString(val);
+              };
+            }
+            const val = Reflect.get(target, prop, target);
+            if (typeof val === "function") {
+              return val.bind(target);
+            }
+            if (typeof val === "string") {
+              return replaceOklchInString(val);
+            }
+            return val;
+          }
+        });
+      };
+
       Object.defineProperty(CSSStyleSheet.prototype, "cssRules", {
         get() {
           try {
             const rules = originalCssRules?.get?.call(this);
-            if (!rules) return rules;
-            const filtered = Array.from(rules).filter((rule: any) => {
-              const text = rule.cssText || "";
-              return !text.includes("oklch") && !text.includes("OKLCH");
-            });
-            (filtered as any).item = (idx: number) => filtered[idx];
-            return filtered as any;
+            return filterRules(rules);
           } catch (e) {
             return [];
           }
@@ -542,13 +683,35 @@ export default function App() {
           get() {
             try {
               const rules = originalRules?.get?.call(this);
-              if (!rules) return rules;
-              const filtered = Array.from(rules).filter((rule: any) => {
-                const text = rule.cssText || "";
-                return !text.includes("oklch") && !text.includes("OKLCH");
-              });
-              (filtered as any).item = (idx: number) => filtered[idx];
-              return filtered as any;
+              return filterRules(rules);
+            } catch (e) {
+              return [];
+            }
+          },
+          configurable: true,
+        });
+      }
+
+      if (originalGroupingRules) {
+        Object.defineProperty(CSSGroupingRule.prototype, "cssRules", {
+          get() {
+            try {
+              const rules = originalGroupingRules.get?.call(this);
+              return filterRules(rules);
+            } catch (e) {
+              return [];
+            }
+          },
+          configurable: true,
+        });
+      }
+
+      if (originalKeyframesRules) {
+        Object.defineProperty(CSSKeyframesRule.prototype, "cssRules", {
+          get() {
+            try {
+              const rules = originalKeyframesRules.get?.call(this);
+              return filterRules(rules);
             } catch (e) {
               return [];
             }
@@ -579,6 +742,7 @@ export default function App() {
 
       // Restore original cssRules properties immediately after html2pdf finishes
       try {
+        window.getComputedStyle = originalGetComputedStyle;
         if (originalCssRules) {
           Object.defineProperty(CSSStyleSheet.prototype, "cssRules", originalCssRules);
         } else {
@@ -588,6 +752,12 @@ export default function App() {
           Object.defineProperty(CSSStyleSheet.prototype, "rules", originalRules);
         } else {
           delete (CSSStyleSheet.prototype as any).rules;
+        }
+        if (originalGroupingRules && typeof CSSGroupingRule !== "undefined") {
+          Object.defineProperty(CSSGroupingRule.prototype, "cssRules", originalGroupingRules);
+        }
+        if (originalKeyframesRules && typeof CSSKeyframesRule !== "undefined") {
+          Object.defineProperty(CSSKeyframesRule.prototype, "cssRules", originalKeyframesRules);
         }
       } catch (restoreErr) {
         console.warn("Could not restore rules getters", restoreErr);
@@ -634,6 +804,7 @@ export default function App() {
     } finally {
       // Ensure getters are restored even if generation throws an error
       try {
+        window.getComputedStyle = originalGetComputedStyle;
         if (originalCssRules) {
           Object.defineProperty(CSSStyleSheet.prototype, "cssRules", originalCssRules);
         } else {
@@ -643,6 +814,12 @@ export default function App() {
           Object.defineProperty(CSSStyleSheet.prototype, "rules", originalRules);
         } else {
           delete (CSSStyleSheet.prototype as any).rules;
+        }
+        if (originalGroupingRules && typeof CSSGroupingRule !== "undefined") {
+          Object.defineProperty(CSSGroupingRule.prototype, "cssRules", originalGroupingRules);
+        }
+        if (originalKeyframesRules && typeof CSSKeyframesRule !== "undefined") {
+          Object.defineProperty(CSSKeyframesRule.prototype, "cssRules", originalKeyframesRules);
         }
       } catch (restoreErr) {
         // quiet fail
@@ -655,18 +832,22 @@ export default function App() {
     const rawHtml = document.getElementById("receipt-ticket-print-panel")?.innerHTML;
     if (!rawHtml) return;
 
-    let iframe = document.getElementById("print-iframe") as HTMLIFrameElement;
-    if (!iframe) {
-      iframe = document.createElement("iframe");
-      iframe.id = "print-iframe";
-      iframe.style.position = "absolute";
-      iframe.style.left = "-9999px";
-      iframe.style.top = "-9999px";
-      iframe.style.width = "300px";
-      iframe.style.height = "200px";
-      iframe.style.border = "0";
-      document.body.appendChild(iframe);
+    // Clean up any stale iframe from previous attempts to reset caching/handlers
+    const existingIframe = document.getElementById("print-iframe");
+    if (existingIframe) {
+      existingIframe.remove();
     }
+
+    // Create a pristine, dedicated iframe
+    const iframe = document.createElement("iframe");
+    iframe.id = "print-iframe";
+    iframe.style.position = "absolute";
+    iframe.style.left = "-9999px";
+    iframe.style.top = "-9999px";
+    iframe.style.width = "75mm"; // Match ticket physical size
+    iframe.style.height = "100px";
+    iframe.style.border = "0";
+    document.body.appendChild(iframe);
 
     const doc = iframe.contentWindow?.document;
     if (!doc) return;
@@ -694,19 +875,41 @@ export default function App() {
         </head>
         <body>
           <div class="ticket-body">
-            ${rawHtml}
+            \${rawHtml}
           </div>
           <script>
-            window.onload = function() {
-              setTimeout(function() {
+            function triggerPrint() {
+              try {
+                window.focus();
                 window.print();
-              }, 250);
-            };
+              } catch (e) {
+                console.error("Subframe self-print failed:", e);
+              }
+            }
+            if (document.readyState === "complete" || document.readyState === "interactive") {
+              setTimeout(triggerPrint, 150);
+            } else {
+              window.onload = function() {
+                setTimeout(triggerPrint, 150);
+              };
+            }
           </script>
         </body>
       </html>
     `);
     doc.close();
+
+    // Dual-trigger fallback: Also call print from the parent window context with focus transfer
+    setTimeout(() => {
+      try {
+        if (iframe && iframe.contentWindow) {
+          iframe.contentWindow.focus();
+          iframe.contentWindow.print();
+        }
+      } catch (error) {
+        console.warn("Parent-driven fallback print skipped due to sandbox constraints.", error);
+      }
+    }, 300);
   };
 
   // Client Editor modal submission and sync
@@ -1084,6 +1287,12 @@ export default function App() {
         valB = montoFinal(b);
       }
 
+      if (config.col === "proximoCobro") {
+        const daysA = diffDays(String(valA));
+        const daysB = diffDays(String(valB));
+        return config.asc ? daysA - daysB : daysB - daysA;
+      }
+
       if (typeof valA === "number") {
         return config.asc ? valA - valB : valB - valA;
       }
@@ -1326,30 +1535,182 @@ export default function App() {
         </div>
       )}
 
+      {/* Mobile Sidebar Overlay Drawer */}
+      {mobileMenuOpen && (
+        <div className="fixed inset-0 z-50 flex md:hidden no-print">
+          {/* Backdrop */}
+          <div
+            className="fixed inset-0 bg-black/60 backdrop-blur-sm transition-opacity"
+            onClick={() => setMobileMenuOpen(false)}
+          />
+          
+          {/* Drawer Menu Panel */}
+          <aside className="relative flex w-64 max-w-[80vw] flex-col justify-between bg-[#0d0d10] p-5 border-r border-white/10 shadow-2xl h-full animate-in slide-in-from-left duration-250">
+            <div className="space-y-6">
+              <div className="flex items-center justify-between border-b border-white/5 pb-4">
+                <div className="flex items-center gap-2">
+                  <div className="w-8 h-8 bg-indigo-500 rounded-lg flex items-center justify-center text-white">
+                    <Shield className="w-4 h-4" />
+                  </div>
+                  <span className="text-sm font-semibold tracking-tight text-white block truncate">
+                    Detektor Menú
+                  </span>
+                </div>
+                <button
+                  onClick={() => setMobileMenuOpen(false)}
+                  className="p-1 rounded-lg bg-neutral-800 hover:bg-neutral-700 text-slate-400 border border-white/10"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              {/* Navigation links duplicated inside Mobile drawer */}
+              <div className="space-y-1">
+                <p className="text-[9px] font-bold text-slate-500 uppercase tracking-widest pl-3 mb-2">Administrador</p>
+                
+                <button
+                  onClick={() => { setActiveTab("dashboard"); setMobileMenuOpen(false); }}
+                  className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm transition-all text-left ${activeTab === "dashboard" ? "bg-indigo-500/10 text-indigo-400 border-l-2 border-indigo-500" : "text-slate-400 hover:bg-white/5"}`}
+                >
+                  <Activity className="w-4 h-4" />
+                  <span>Resumen General</span>
+                </button>
+
+                <button
+                  onClick={() => { navigateToPendientes(); setMobileMenuOpen(false); }}
+                  className={`w-full flex items-center justify-between px-4 py-2.5 rounded-lg text-sm transition-all text-left ${activeTab === "pendientes" ? "bg-indigo-500/10 text-indigo-400 border-l-2 border-indigo-500" : "text-slate-400 hover:bg-white/5"}`}
+                >
+                  <div className="flex items-center gap-3">
+                    <Bell className="w-4 h-4" />
+                    <span>Cobros Pendientes</span>
+                  </div>
+                  {overdueClients.length > 0 && (
+                    <span className="bg-red-500/20 text-red-400 text-[10px] font-bold px-1.5 py-0.5 rounded-full border border-red-500/30">
+                      {overdueClients.length}
+                    </span>
+                  )}
+                </button>
+
+                <button
+                  onClick={() => { setActiveTab("clientes"); setMobileMenuOpen(false); }}
+                  className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm transition-all text-left ${activeTab === "clientes" ? "bg-indigo-500/10 text-indigo-400 border-l-2 border-indigo-500" : "text-slate-400 hover:bg-white/5"}`}
+                >
+                  <Users className="w-4 h-4" />
+                  <span>Clientes de Contrato</span>
+                </button>
+
+                <button
+                  onClick={() => { setActiveTab("calendario"); setMobileMenuOpen(false); }}
+                  className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm transition-all text-left ${activeTab === "calendario" ? "bg-indigo-500/10 text-indigo-400 border-l-2 border-indigo-500" : "text-slate-400 hover:bg-white/5"}`}
+                >
+                  <CalendarIcon className="w-4 h-4" />
+                  <span>Calendario Mensual</span>
+                </button>
+              </div>
+
+              <div className="space-y-1">
+                <p className="text-[9px] font-bold text-slate-500 uppercase tracking-widest pl-3 mb-2">FACTURACIÓN Y CAJA</p>
+
+                <button
+                  onClick={() => { setActiveTab("recibos"); setMobileMenuOpen(false); }}
+                  className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm transition-all text-left ${activeTab === "recibos" ? "bg-indigo-500/10 text-indigo-400 border-l-2 border-indigo-500" : "text-slate-400 hover:bg-white/5"}`}
+                >
+                  <FileText className="w-4 h-4" />
+                  <span>Recibos Libres</span>
+                </button>
+
+                <button
+                  onClick={() => { setActiveTab("ingresos"); setMobileMenuOpen(false); }}
+                  className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm transition-all text-left ${activeTab === "ingresos" ? "bg-indigo-500/10 text-indigo-400 border-l-2 border-indigo-500" : "text-slate-400 hover:bg-white/5"}`}
+                >
+                  <TrendingUp className="w-4 h-4" />
+                  <span>Reporte de Ingresos</span>
+                </button>
+              </div>
+            </div>
+
+            <div className="space-y-3 border-t border-white/5 pt-4">
+              <div className="p-3 bg-[#16161a] rounded-xl border border-white/5 space-y-2">
+                <span className="text-[10px] font-bold text-indigo-400 block uppercase tracking-wider">Sesión Activa</span>
+                <p className="text-xs font-semibold text-white truncate">{userMetadata.name}</p>
+                <p className="text-[9px] font-mono text-slate-400 leading-relaxed">
+                  Empresa: {userMetadata.tenantId}<br />
+                  Usuario ID: {userMetadata.userId}<br />
+                  BD: {dbStatus.mode.toUpperCase()}
+                </p>
+                <button
+                  onClick={() => { handleLogout(); setMobileMenuOpen(false); }}
+                  className="w-full mt-2 py-1.5 px-3 bg-red-500/10 hover:bg-red-500/20 text-red-400 rounded-lg text-[10px] uppercase font-bold tracking-wider border border-red-500/20 transition-all text-center block"
+                >
+                  Cerrar Sesión
+                </button>
+              </div>
+            </div>
+          </aside>
+        </div>
+      )}
+
       {/* Header Panel */}
-      <header className="h-16 border-b border-white/5 flex items-center justify-between px-6 bg-[#0d0d10] no-print">
+      <header className="h-16 border-b border-white/5 flex items-center justify-between px-4 sm:px-6 bg-[#0d0d10] no-print">
         <div className="flex items-center gap-3">
-          <div className="w-9 h-9 bg-indigo-500 rounded-lg flex items-center justify-center text-white shadow-md active:scale-95 transition-transform">
-            <Shield className="w-5 h-5" />
-          </div>
-          <div>
-            <span className="text-md font-semibold tracking-tight text-white block">
-              Detektor Cobros — <span className="font-mono text-xs text-indigo-400">{empresa.nombre}</span>
+          {/* Mobile hamburger menu toggle */}
+          <button
+            onClick={() => setMobileMenuOpen(true)}
+            className="p-1.5 rounded-lg bg-neutral-800 hover:bg-neutral-700 hover:text-white text-slate-400 border border-white/10 md:hidden transition-all mr-0.5"
+            title="Abrir Menú"
+          >
+            <Menu className="w-5 h-5" />
+          </button>
+          
+          {empresa.logo ? (
+            <div className="w-9 h-9 bg-white rounded-lg hidden sm:flex items-center justify-center p-1 border border-white/10 shadow-md overflow-hidden">
+              <img
+                src={getLogoSrc(empresa.logo)}
+                className="max-w-full max-h-full object-contain"
+                alt="Logo Empresa"
+              />
+            </div>
+          ) : (
+            <div className="w-9 h-9 bg-indigo-500 rounded-lg hidden sm:flex items-center justify-center text-white shadow-md active:scale-95 transition-transform">
+              <Shield className="w-5 h-5" />
+            </div>
+          )}
+          <div className="min-w-0">
+            <span className="text-xs sm:text-md font-semibold tracking-tight text-white block truncate max-w-[140px] xse:max-w-[180px] sm:max-w-xs md:max-w-none">
+              {empresa.nombre}
             </span>
-            <span className="text-[10px] text-slate-500 tracking-wider">PORT 3000 • DYNAMODB SERVICE</span>
+            <span className="text-[10px] text-slate-500 tracking-wider hidden sm:block">PORT 3000 • DYNAMODB SERVICE</span>
           </div>
         </div>
 
-        <div className="flex items-center gap-4">
-          <div className="flex items-center gap-2 px-3 py-1 bg-green-500/10 border border-green-500/20 rounded-full">
-            <div className={`w-2 h-2 rounded-full ${dbStatus.mode === "dynamo" ? "bg-green-500" : "bg-yellow-500"}`}></div>
-            <span className={`text-[10px] font-bold tracking-wider uppercase ${dbStatus.mode === "dynamo" ? "text-green-400" : "text-yellow-400"}`}>
+        <div className="flex items-center gap-2 sm:gap-4">
+          {dbStatus.error && (
+            <div
+              className="flex items-center gap-2 px-2 py-1 bg-red-500/10 border border-red-500/20 rounded-md cursor-help max-w-[80px] xs:max-w-[150px] sm:max-w-[200px]"
+              title={`Clic para ver error completo:\n\n${dbStatus.error}`}
+              onClick={() => {
+                triggerToast(`⚠️ Error BD: ${dbStatus.error}`);
+              }}
+            >
+              <div className="w-2 h-2 rounded-full bg-red-500 animate-pulse flex-shrink-0"></div>
+              <span className="text-[10px] font-semibold text-red-400 truncate" style={{ fontSize: `${parseInt(fontSize) - 2}px` }}>
+                Error: {dbStatus.error}
+              </span>
+            </div>
+          )}
+
+          <div 
+            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full border ${dbStatus.mode === "dynamo" ? "bg-green-500/10 border-green-500/20" : "bg-yellow-500/10 border-yellow-500/20"}`}
+            title={dbStatus.mode === "dynamo" ? "DynamoDB: Online" : "Local: JSON Fallback"}
+          >
+            <div className={`w-2 h-2 rounded-full flex-shrink-0 ${dbStatus.mode === "dynamo" ? "bg-green-500" : "bg-yellow-500"}`}></div>
+            <span className={`text-[10px] font-bold tracking-wider uppercase hidden md:inline ${dbStatus.mode === "dynamo" ? "text-green-400" : "text-yellow-400"}`}>
               {dbStatus.mode === "dynamo" ? "DynamoDB: Online" : "Local: JSON Fallback"}
             </span>
           </div>
 
           {/* Global Fonts Controls */}
-          <div className="flex items-center border-l border-white/10 pl-4 gap-1.5">
+          <div className="hidden md:flex items-center border-l border-white/10 pl-4 gap-1.5">
             <button
               onClick={() => changeFontSize(-1)}
               className="w-7 h-7 bg-white/5 border border-white/10 hover:bg-white/10 text-slate-200 font-bold rounded flex items-center justify-center text-sm"
@@ -1368,7 +1729,7 @@ export default function App() {
 
           <button
             onClick={() => setIsConfigModalOpen(true)}
-            className="w-8 h-8 rounded-lg bg-neutral-800 hover:bg-neutral-700 hover:text-white flex items-center justify-center text-slate-400 border border-white/10 transition-colors"
+            className="w-8 h-8 rounded-lg bg-neutral-800 hover:bg-neutral-700 hover:text-white flex items-center justify-center text-slate-400 border border-white/10 transition-colors flex-shrink-0"
             title="Configuración de Empresa"
           >
             <Settings className="w-4 h-4" />
@@ -1376,7 +1737,7 @@ export default function App() {
 
           <button
             onClick={loadAllData}
-            className={`p-1 text-slate-400 hover:text-white transition-colors ${isSyncing ? "animate-spin" : ""}`}
+            className={`p-1.5 text-slate-400 hover:text-white transition-colors flex-shrink-0 ${isSyncing ? "animate-spin" : ""}`}
             title="Sincronizar base de datos con servidor"
           >
             <RefreshCw className="w-4 h-4" />
@@ -1387,7 +1748,7 @@ export default function App() {
       {/* Main Structural Container */}
       <div className="flex flex-1 overflow-hidden">
         {/* Sidebar Navigation */}
-        <aside className="w-64 border-r border-white/5 bg-[#0d0d10] p-5 flex flex-col justify-between no-print">
+        <aside className="hidden md:flex w-64 border-r border-white/5 bg-[#0d0d10] p-5 flex-col justify-between no-print">
           <div className="space-y-6">
             <div className="space-y-1">
               <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest pl-3 mb-2">Administrador</p>
@@ -1474,7 +1835,7 @@ export default function App() {
         </aside>
 
         {/* Content Viewer Viewport */}
-        <main className="flex-1 p-6 overflow-y-auto bg-[#0a0a0c]">
+        <main className="flex-1 p-3 md:p-6 overflow-y-auto bg-[#0a0a0c]">
           
           {/* TAB 1: DASHBOARD ACTIVE PANEL */}
           {activeTab === "dashboard" && (
@@ -1677,8 +2038,8 @@ export default function App() {
                   <p className="text-xs text-slate-500">Manejo de estados de vencimiento y envío directo de avisos por WhatsApp.</p>
                 </div>
 
-                <div className="flex items-center gap-3">
-                  <div className="relative">
+                <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 w-full sm:w-auto">
+                  <div className="relative w-full sm:w-52">
                     <Search className="w-4 h-4 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
                     <input
                       type="text"
@@ -1688,7 +2049,7 @@ export default function App() {
                         setPagePend(1);
                         setSpSearch(e.target.value);
                       }}
-                      className="pl-9 pr-4 py-1.5 text-xs bg-black/40 border border-white/10 rounded-lg text-white focus:outline-none focus:border-indigo-500 w-52"
+                      className="pl-9 pr-4 py-1.5 text-xs bg-black/40 border border-white/10 rounded-lg text-white focus:outline-none focus:border-indigo-500 w-full"
                     />
                   </div>
 
@@ -1698,7 +2059,7 @@ export default function App() {
                       setPagePend(1);
                       setSpFilter(e.target.value);
                     }}
-                    className="px-3 py-1.5 text-xs bg-black/40 border border-white/10 rounded-lg text-white font-medium"
+                    className="px-3 py-1.5 text-xs bg-black/40 border border-white/10 rounded-lg text-white font-medium w-full sm:w-auto"
                   >
                     <option value="">Filtro: Todos</option>
                     <option value="overdue">⚠️ Vencidos únicamente</option>
@@ -1752,141 +2113,143 @@ export default function App() {
                 return (
                   <div className="space-y-4">
                     <div className="bg-[#16161a] rounded-xl border border-white/5 overflow-hidden">
-                      <table className="w-full text-left text-xs">
-                        <thead className="bg-[#1e1e24]/50 text-slate-400 font-bold border-b border-white/5">
-                          <tr>
-                            <th className="p-3 cursor-pointer" onClick={() => toggleSortPending("cuenta")}>
-                              Cuenta / ID{getSortArrow("cuenta", sortPend.col, sortPend.asc)}
-                            </th>
-                            <th className="p-3 cursor-pointer" onClick={() => toggleSortPending("nombre")}>
-                              Cliente{getSortArrow("nombre", sortPend.col, sortPend.asc)}
-                            </th>
-                            <th className="p-3">Teléfono</th>
-                            <th className="p-3">Servicio programado</th>
-                            <th className="p-3 cursor-pointer" onClick={() => toggleSortPending("montoFinal")}>
-                              Importe{getSortArrow("montoFinal", sortPend.col, sortPend.asc)}
-                            </th>
-                            <th className="p-3 cursor-pointer" onClick={() => toggleSortPending("proximoCobro")}>
-                              Próxima fecha{getSortArrow("proximoCobro", sortPend.col, sortPend.asc)}
-                            </th>
-                            <th className="p-3">Estado</th>
-                            <th className="p-3 text-center">Acciones</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-white/5">
-                          {currentChunk.map((c) => {
-                            const days = diffDays(c.proximoCobro);
-                            const overdue = days < 0 && c.estado === "activo";
-                            const isToday = days === 0 && c.estado === "activo";
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-left text-xs">
+                          <thead className="bg-[#1e1e24]/50 text-slate-400 font-bold border-b border-white/5">
+                            <tr>
+                              <th className="p-3 cursor-pointer" onClick={() => toggleSortPending("cuenta")}>
+                                Cuenta / ID{getSortArrow("cuenta", sortPend.col, sortPend.asc)}
+                              </th>
+                              <th className="p-3 cursor-pointer" onClick={() => toggleSortPending("nombre")}>
+                                Cliente{getSortArrow("nombre", sortPend.col, sortPend.asc)}
+                              </th>
+                              <th className="p-3">Teléfono</th>
+                              <th className="p-3">Servicio programado</th>
+                              <th className="p-3 cursor-pointer" onClick={() => toggleSortPending("montoFinal")}>
+                                Importe{getSortArrow("montoFinal", sortPend.col, sortPend.asc)}
+                              </th>
+                              <th className="p-3 cursor-pointer" onClick={() => toggleSortPending("proximoCobro")}>
+                                Próxima fecha{getSortArrow("proximoCobro", sortPend.col, sortPend.asc)}
+                              </th>
+                              <th className="p-3">Estado</th>
+                              <th className="p-3 text-center">Acciones</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-white/5">
+                            {currentChunk.map((c) => {
+                              const days = diffDays(c.proximoCobro);
+                              const overdue = days < 0 && c.estado === "activo";
+                              const isToday = days === 0 && c.estado === "activo";
 
-                            let rowBg = "hover:bg-white/5";
-                            if (overdue) rowBg = "bg-red-500/[0.02] hover:bg-red-500/[0.04]";
-                            else if (isToday) rowBg = "bg-yellow-500/[0.02] hover:bg-yellow-500/[0.04]";
+                              let rowBg = "hover:bg-white/5";
+                              if (overdue) rowBg = "bg-red-500/[0.02] hover:bg-red-500/[0.04]";
+                              else if (isToday) rowBg = "bg-yellow-500/[0.02] hover:bg-yellow-500/[0.04]";
 
-                            return (
-                              <tr key={c.id} className={`${rowBg} transition-all`}>
-                                <td className="p-3 font-mono font-bold text-indigo-400">{c.cuenta}</td>
-                                <td
-                                  className="p-3 font-bold text-white cursor-pointer hover:underline"
-                                  onClick={() => handleOpenClientEditor(c)}
-                                >
-                                  {c.nombre}
-                                </td>
-                                <td className="p-3 text-slate-400 font-mono">
-                                  <div>{c.tel || "—"}</div>
-                                  {c.contactos && c.contactos.length > 0 && (
-                                    <details className="group mt-1 cursor-pointer">
-                                      <summary className="list-none flex items-center gap-1 text-[10px] text-indigo-400 font-bold hover:text-indigo-300 font-sans focus:outline-none">
-                                        <svg xmlns="http://www.w3.org/2000/svg" className="w-2.5 h-2.5 transition-transform group-open:rotate-180" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="m6 9 6 6 6-6"/></svg>
-                                        <span>Contactos ({c.contactos.length})</span>
-                                      </summary>
-                                      <div className="mt-1.5 space-y-1 text-[10px] text-slate-400 font-normal font-sans group-open:animate-fadeIn">
-                                        {c.contactos.map((contact, idx) => (
-                                          <div key={idx} className="flex flex-col gap-1 bg-white/5 p-1.5 rounded text-slate-300 max-w-[200px] border border-white/5">
-                                            <div className="flex flex-col min-w-0">
-                                              <span className="font-semibold text-indigo-400 truncate" title={contact.nombre}>{contact.nombre || "Sin Nombre"}:</span>
-                                              <span className="font-mono text-[9px] text-slate-400">{contact.cel || "—"}</span>
-                                            </div>
-                                            {contact.cel && (
-                                              <div className="flex items-center gap-1 mt-0.5" onClick={(e) => e.stopPropagation()}>
-                                                <a
-                                                  href={`tel:${contact.cel.replace(/\D/g, "")}`}
-                                                  className="flex-1 py-0.5 bg-green-500/10 hover:bg-green-500/20 border border-green-500/20 text-green-400 rounded text-[8px] font-bold flex items-center justify-center gap-0.5 transition active:scale-95"
-                                                >
-                                                  <svg xmlns="http://www.w3.org/2000/svg" className="w-2 h-2" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/></svg>
-                                                  Llamar
-                                                </a>
-                                                <a
-                                                  href={`https://wa.me/${contact.cel.replace(/\D/g, "")}`}
-                                                  target="_blank"
-                                                  rel="noopener noreferrer"
-                                                  className="flex-1 py-0.5 bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/20 text-emerald-400 rounded text-[8px] font-bold flex items-center justify-center gap-0.5 transition active:scale-95"
-                                                >
-                                                  <svg xmlns="http://www.w3.org/2000/svg" className="w-2 h-2" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>
-                                                  WhatsApp
-                                                </a>
+                              return (
+                                <tr key={c.id} className={`${rowBg} transition-all`}>
+                                  <td className="p-3 font-mono font-bold text-indigo-400">{c.cuenta}</td>
+                                  <td
+                                    className="p-3 font-bold text-white cursor-pointer hover:underline"
+                                    onClick={() => handleOpenClientEditor(c)}
+                                  >
+                                    {c.nombre}
+                                  </td>
+                                  <td className="p-3 text-slate-400 font-mono">
+                                    <div>{c.tel || "—"}</div>
+                                    {c.contactos && c.contactos.length > 0 && (
+                                      <details className="group mt-1 cursor-pointer">
+                                        <summary className="list-none flex items-center gap-1 text-[10px] text-indigo-400 font-bold hover:text-indigo-300 font-sans focus:outline-none">
+                                          <svg xmlns="http://www.w3.org/2050/svg" className="w-2.5 h-2.5 transition-transform group-open:rotate-180" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+                                          <span>Contactos ({c.contactos.length})</span>
+                                        </summary>
+                                        <div className="mt-1.5 space-y-1 text-[10px] text-slate-400 font-normal font-sans group-open:animate-fadeIn">
+                                          {c.contactos.map((contact, idx) => (
+                                            <div key={idx} className="flex flex-col gap-1 bg-white/5 p-1.5 rounded text-slate-300 max-w-[200px] border border-white/5">
+                                              <div className="flex flex-col min-w-0">
+                                                <span className="font-semibold text-indigo-400 truncate" title={contact.nombre}>{contact.nombre || "Sin Nombre"}:</span>
+                                                <span className="font-mono text-[9px] text-slate-400">{contact.cel || "—"}</span>
                                               </div>
-                                            )}
-                                          </div>
-                                        ))}
-                                      </div>
-                                    </details>
-                                  )}
-                                </td>
-                                <td className="p-3 text-slate-400 font-medium">
-                                  {c.servicio || "Monitoreo"}
-                                  {c.desc && <span className="block text-[10px] text-slate-500">{c.desc}</span>}
-                                </td>
-                                <td className="p-3 font-mono font-bold text-white">
-                                  ${montoFinal(c).toLocaleString()}
-                                  {c.descuento > 0 && (
-                                    <span className="text-[10px] text-yellow-500 block">-{c.descuento}% desc.</span>
-                                  )}
-                                </td>
-                                <td className="p-3 font-mono font-semibold">
-                                  <span>{fmtDate(c.proximoCobro)}</span>
-                                  {overdue && (
-                                    <span className="block text-[10px] text-red-500 font-bold">Vencido ({Math.abs(days)}d)</span>
-                                  )}
-                                  {isToday && (
-                                    <span className="block text-[10px] text-yellow-500 font-bold">🔔 ¡Fórmula Hoy!</span>
-                                  )}
-                                </td>
-                                <td className="p-3">
-                                  <span className={`px-2 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider ${
-                                    c.estado === "activo" ? "bg-green-500/10 text-green-400 border border-green-500/20" : "bg-yellow-500/10 text-yellow-500 border border-yellow-500/20"
-                                  }`}>
-                                    {c.estado}
-                                  </span>
-                                </td>
-                                <td className="p-3">
-                                  <div className="flex gap-2 justify-center">
-                                    <button
-                                      onClick={() => handleRegisterPayment(c.id)}
-                                      className="px-2 py-1 bg-green-700 hover:bg-green-600 text-white font-bold rounded text-[10px]"
-                                    >
-                                      Cobrar
-                                    </button>
-                                    <button
-                                      onClick={() => handleSendWhatsAppNotification(c)}
-                                      className="px-2 py-1 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/20 text-emerald-400 rounded text-[10px] flex items-center gap-1"
-                                      title="WhatsApp"
-                                    >
-                                      Aviso
-                                    </button>
-                                    <button
-                                      onClick={() => handleOpenClientEditor(c)}
-                                      className="px-2 py-1 bg-white/5 hover:bg-white/10 text-slate-300 rounded text-[10px]"
-                                    >
-                                      Editar
-                                    </button>
-                                  </div>
-                                </td>
-                              </tr>
-                            );
-                          })}
-                        </tbody>
-                      </table>
+                                              {contact.cel && (
+                                                <div className="flex items-center gap-1 mt-0.5" onClick={(e) => e.stopPropagation()}>
+                                                  <a
+                                                    href={`tel:${contact.cel.replace(/\D/g, "")}`}
+                                                    className="flex-1 py-0.5 bg-green-500/10 hover:bg-green-500/20 border border-green-500/20 text-green-400 rounded text-[8px] font-bold flex items-center justify-center gap-0.5 transition active:scale-95"
+                                                  >
+                                                    <svg xmlns="http://www.w3.org/2000/svg" className="w-2 h-2" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/></svg>
+                                                    Llamar
+                                                  </a>
+                                                  <a
+                                                    href={`https://wa.me/${contact.cel.replace(/\D/g, "")}`}
+                                                    target="_blank"
+                                                    rel="noopener noreferrer"
+                                                    className="flex-1 py-0.5 bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/20 text-emerald-400 rounded text-[8px] font-bold flex items-center justify-center gap-0.5 transition active:scale-95"
+                                                  >
+                                                    <svg xmlns="http://www.w3.org/2000/svg" className="w-2 h-2" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>
+                                                    WhatsApp
+                                                  </a>
+                                                </div>
+                                              )}
+                                            </div>
+                                          ))}
+                                        </div>
+                                      </details>
+                                    )}
+                                  </td>
+                                  <td className="p-3 text-slate-400 font-medium">
+                                    {c.servicio || "Monitoreo"}
+                                    {c.desc && <span className="block text-[10px] text-slate-500">{c.desc}</span>}
+                                  </td>
+                                  <td className="p-3 font-mono font-bold text-white">
+                                    ${montoFinal(c).toLocaleString()}
+                                    {c.descuento > 0 && (
+                                      <span className="text-[10px] text-yellow-500 block">-{c.descuento}% desc.</span>
+                                    )}
+                                  </td>
+                                  <td className="p-3 font-mono font-semibold">
+                                    <span>{fmtDate(c.proximoCobro)}</span>
+                                    {overdue && (
+                                      <span className="block text-[10px] text-red-500 font-bold">Vencido ({Math.abs(days)}d)</span>
+                                    )}
+                                    {isToday && (
+                                      <span className="block text-[10px] text-yellow-500 font-bold">🔔 ¡Fórmula Hoy!</span>
+                                    )}
+                                  </td>
+                                  <td className="p-3">
+                                    <span className={`px-2 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider ${
+                                      c.estado === "activo" ? "bg-green-500/10 text-green-400 border border-green-500/20" : "bg-yellow-500/10 text-yellow-500 border border-yellow-500/20"
+                                    }`}>
+                                      {c.estado}
+                                    </span>
+                                  </td>
+                                  <td className="p-3">
+                                    <div className="flex gap-2 justify-center">
+                                      <button
+                                        onClick={() => handleRegisterPayment(c.id)}
+                                        className="px-2 py-1 bg-green-700 hover:bg-green-600 text-white font-bold rounded text-[10px]"
+                                      >
+                                        Cobrar
+                                      </button>
+                                      <button
+                                        onClick={() => handleSendWhatsAppNotification(c)}
+                                        className="px-2 py-1 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/20 text-emerald-400 rounded text-[10px] flex items-center gap-1"
+                                        title="WhatsApp"
+                                      >
+                                        Aviso
+                                      </button>
+                                      <button
+                                        onClick={() => handleOpenClientEditor(c)}
+                                        className="px-2 py-1 bg-white/5 hover:bg-white/10 text-slate-300 rounded text-[10px]"
+                                      >
+                                        Editar
+                                      </button>
+                                    </div>
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
                     </div>
 
                     {/* Pagination Controllers */}
@@ -1928,8 +2291,8 @@ export default function App() {
                   <p className="text-xs text-slate-500">Soporta filtrado integral por contratos suspendidos, cancelados o activos.</p>
                 </div>
 
-                <div className="flex items-center gap-3">
-                  <div className="relative">
+                <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 w-full sm:w-auto">
+                  <div className="relative w-full sm:w-56">
                     <Search className="w-4 h-4 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
                     <input
                       type="text"
@@ -1939,7 +2302,7 @@ export default function App() {
                         setPageClientes(1);
                         setScSearch(e.target.value);
                       }}
-                      className="pl-9 pr-4 py-1.5 text-xs bg-black/40 border border-white/10 rounded-lg text-white focus:outline-none focus:border-indigo-500 w-56"
+                      className="pl-9 pr-4 py-1.5 text-xs bg-black/40 border border-white/10 rounded-lg text-white focus:outline-none focus:border-indigo-500 w-full"
                     />
                   </div>
 
@@ -1949,7 +2312,7 @@ export default function App() {
                       setPageClientes(1);
                       setScFilter(e.target.value);
                     }}
-                    className="px-3 py-1.5 text-xs bg-black/40 border border-white/10 rounded-lg text-white font-medium"
+                    className="px-3 py-1.5 text-xs bg-black/40 border border-white/10 rounded-lg text-white font-medium w-full sm:w-auto"
                   >
                     <option value="">Estado: Todos</option>
                     <option value="activo">✅ Activos únicamente</option>
@@ -1985,29 +2348,30 @@ export default function App() {
                 return (
                   <div className="space-y-4">
                     <div className="bg-[#16161a] rounded-xl border border-white/5 overflow-hidden">
-                      <table className="w-full text-left text-xs">
-                        <thead className="bg-[#1e1e24]/50 text-slate-400 font-bold border-b border-white/5">
-                          <tr>
-                            <th className="p-3 cursor-pointer" onClick={() => toggleSortClients("cuenta")}>
-                              Cuenta{getSortArrow("cuenta", sortClientes.col, sortClientes.asc)}
-                            </th>
-                            <th className="p-3 cursor-pointer" onClick={() => toggleSortClients("nombre")}>
-                              Nombre{getSortArrow("nombre", sortClientes.col, sortClientes.asc)}
-                            </th>
-                            <th className="p-3">Teléfono</th>
-                            <th className="p-3">Servicio de Contrato</th>
-                            <th className="p-3">Frecuencia</th>
-                            <th className="p-3 cursor-pointer" onClick={() => toggleSortClients("montoFinal")}>
-                              Monto Final{getSortArrow("montoFinal", sortClientes.col, sortClientes.asc)}
-                            </th>
-                            <th className="p-3 cursor-pointer" onClick={() => toggleSortClients("proximoCobro")}>
-                              Próxima fecha{getSortArrow("proximoCobro", sortClientes.col, sortClientes.asc)}
-                            </th>
-                            <th className="p-3">Estado</th>
-                            <th className="p-3 text-center">Gestión</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-white/5 text-slate-300">
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-left text-xs">
+                          <thead className="bg-[#1e1e24]/50 text-slate-400 font-bold border-b border-white/5">
+                            <tr>
+                              <th className="p-3 cursor-pointer" onClick={() => toggleSortClients("cuenta")}>
+                                Cuenta{getSortArrow("cuenta", sortClientes.col, sortClientes.asc)}
+                              </th>
+                              <th className="p-3 cursor-pointer" onClick={() => toggleSortClients("nombre")}>
+                                Nombre{getSortArrow("nombre", sortClientes.col, sortClientes.asc)}
+                              </th>
+                              <th className="p-3">Teléfono</th>
+                              <th className="p-3">Servicio de Contrato</th>
+                              <th className="p-3">Frecuencia</th>
+                              <th className="p-3 cursor-pointer" onClick={() => toggleSortClients("montoFinal")}>
+                                Monto Final{getSortArrow("montoFinal", sortClientes.col, sortClientes.asc)}
+                              </th>
+                              <th className="p-3 cursor-pointer" onClick={() => toggleSortClients("proximoCobro")}>
+                                Próxima fecha{getSortArrow("proximoCobro", sortClientes.col, sortClientes.asc)}
+                              </th>
+                              <th className="p-3">Estado</th>
+                              <th className="p-3 text-center">Gestión</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-white/5 text-slate-300">
                           {currentChunk.map((c) => (
                             <tr key={c.id} className="hover:bg-white/5 transition-all">
                               <td className="p-3 font-mono font-bold text-indigo-400">{c.cuenta}</td>
@@ -2098,6 +2462,7 @@ export default function App() {
                         </tbody>
                       </table>
                     </div>
+                  </div>
 
                     {/* Pagination controllers */}
                     {totalPages > 1 && (
@@ -2132,7 +2497,7 @@ export default function App() {
           {/* TAB 4: CALENDARIO MENSUAL DE CONTRATOS */}
           {activeTab === "calendario" && (
             <div className="space-y-6">
-              <div className="flex justify-between items-center bg-[#16161a] p-4 rounded-xl border border-white/5">
+              <div className="flex flex-col sm:flex-row justify-between items-center bg-[#16161a] p-4 rounded-xl border border-white/5 gap-3">
                 <div className="flex items-center gap-3">
                   <button
                     onClick={() => {
@@ -2147,7 +2512,7 @@ export default function App() {
                   >
                     <ChevronLeft className="w-4 h-4" />
                   </button>
-                  <h3 className="text-md font-extrabold text-white uppercase tracking-wider select-none min-w-[180px] text-center">
+                  <h3 className="text-sm sm:text-md font-extrabold text-white uppercase tracking-wider select-none min-w-[140px] sm:min-w-[180px] text-center">
                     {new Date(calY, calM, 1).toLocaleDateString("es-MX", { month: "long", year: "numeric" })}
                   </h3>
                   <button
@@ -2164,7 +2529,7 @@ export default function App() {
                     <ChevronRight className="w-4 h-4" />
                   </button>
                 </div>
-                <p className="text-xs text-slate-500 font-semibold uppercase tracking-widest bg-black/40 px-3 py-1 rounded border border-white/5">
+                <p className="text-[10px] sm:text-xs text-slate-500 font-semibold uppercase tracking-widest bg-black/40 px-3 py-1 rounded border border-white/5 text-center w-full sm:w-auto">
                   Vencimientos de Servicio del Periodo
                 </p>
               </div>
@@ -2188,60 +2553,62 @@ export default function App() {
                   });
 
                 return (
-                  <div className="grid grid-cols-7 gap-2">
-                    {/* Days of the week header */}
-                    {["Domingo", "Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado"].map((day) => (
-                      <div key={day} className="text-center py-2 text-xs font-bold uppercase tracking-wider text-slate-500 bg-[#16161a] border border-white/5 rounded-md">
-                        {day.slice(0, 3)}
-                      </div>
-                    ))}
-
-                    {/* Pre-spaces in month */}
-                    {Array.from({ length: firstDayIndex }).map((_, idx) => (
-                      <div key={`empty-${idx}`} className="min-h-[80px] bg-transparent border border-transparent rounded-lg"></div>
-                    ))}
-
-                    {/* True days elements */}
-                    {daysArray.map((dayNum) => {
-                      const dayEvents = eventsMap[dayNum] || [];
-                      const today = new Date();
-                      const isToday =
-                        today.getDate() === dayNum &&
-                        today.getMonth() === calM &&
-                        today.getFullYear() === calY;
-
-                      return (
-                        <div
-                          key={`day-${dayNum}`}
-                          className={`min-h-[85px] p-2 rounded-lg border-2 flex flex-col justify-between transition-all bg-[#0d0d10] ${
-                            isToday ? "border-indigo-500 bg-indigo-500/5 shadow-md flex-grow" : "border-white/5 hover:border-slate-700 hover:bg-white/[0.01]"
-                          }`}
-                        >
-                          <span className={`text-xs font-bold block ${isToday ? "text-indigo-400 font-extrabold" : "text-slate-400"}`}>
-                            {dayNum}
-                          </span>
-                          
-                          <div className="space-y-1 mt-1 max-h-[60px] overflow-y-auto w-full">
-                            {dayEvents.map((ev) => {
-                              const daysDiff = diffDays(ev.proximoCobro);
-                              const isOverdue = daysDiff < 0 && ev.estado === "activo";
-                              const textCls = isOverdue ? "text-red-400 bg-red-400/10 border-red-500/20" : "text-indigo-400 bg-indigo-400/10 border-indigo-500/20";
-                              
-                              return (
-                                <div
-                                  key={ev.id}
-                                  onClick={() => handleOpenClientEditor(ev)}
-                                  className={`text-[9px] font-bold px-1.5 py-0.5 rounded border leading-tight truncate cursor-pointer transition active:scale-95 ${textCls}`}
-                                  title={`${ev.cuenta}\n${ev.nombre}\n$${montoFinal(ev).toLocaleString()}`}
-                                >
-                                  {ev.nombre.split(" ")[0]}
-                                </div>
-                              );
-                            })}
-                          </div>
+                  <div className="overflow-x-auto pb-2">
+                    <div className="grid grid-cols-7 gap-1 sm:gap-2 min-w-[640px] md:min-w-0">
+                      {/* Days of the week header */}
+                      {["Domingo", "Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado"].map((day) => (
+                        <div key={day} className="text-center py-2 text-xs font-bold uppercase tracking-wider text-slate-500 bg-[#16161a] border border-white/5 rounded-md">
+                          {day.slice(0, 3)}
                         </div>
-                      );
-                    })}
+                      ))}
+
+                      {/* Pre-spaces in month */}
+                      {Array.from({ length: firstDayIndex }).map((_, idx) => (
+                        <div key={`empty-${idx}`} className="min-h-[80px] bg-transparent border border-transparent rounded-lg"></div>
+                      ))}
+
+                      {/* True days elements */}
+                      {daysArray.map((dayNum) => {
+                        const dayEvents = eventsMap[dayNum] || [];
+                        const today = new Date();
+                        const isToday =
+                          today.getDate() === dayNum &&
+                          today.getMonth() === calM &&
+                          today.getFullYear() === calY;
+
+                        return (
+                          <div
+                            key={`day-${dayNum}`}
+                            className={`min-h-[70px] sm:min-h-[85px] p-2 rounded-lg border-2 flex flex-col justify-between transition-all bg-[#0d0d10] ${
+                              isToday ? "border-indigo-500 bg-indigo-500/5 shadow-md flex-grow" : "border-white/5 hover:border-slate-700 hover:bg-white/[0.01]"
+                            }`}
+                          >
+                            <span className={`text-xs font-bold block ${isToday ? "text-indigo-400 font-extrabold" : "text-slate-400"}`}>
+                              {dayNum}
+                            </span>
+                            
+                            <div className="space-y-1 mt-1 max-h-[60px] overflow-y-auto w-full">
+                              {dayEvents.map((ev) => {
+                                const daysDiff = diffDays(ev.proximoCobro);
+                                const isOverdue = daysDiff < 0 && ev.estado === "activo";
+                                const textCls = isOverdue ? "text-red-400 bg-red-400/10 border-red-500/20" : "text-indigo-400 bg-indigo-400/10 border-indigo-500/20";
+                                
+                                return (
+                                  <div
+                                    key={ev.id}
+                                    onClick={() => handleOpenClientEditor(ev)}
+                                    className={`text-[9px] font-bold px-1.5 py-0.5 rounded border leading-tight truncate cursor-pointer transition active:scale-95 ${textCls}`}
+                                    title={`${ev.cuenta}\n${ev.nombre}\n$${montoFinal(ev).toLocaleString()}`}
+                                  >
+                                    {ev.nombre.split(" ")[0]}
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
                   </div>
                 );
               })()}
@@ -2269,7 +2636,7 @@ export default function App() {
             <div className="space-y-6">
               {/* Header and Date Range Controls */}
               <div className="bg-[#16161a] p-5 rounded-xl border border-white/5 space-y-4">
-                <div className="flex justify-between items-start flex-wrap gap-4">
+                <div className="flex flex-col md:flex-row justify-between items-stretch md:items-start gap-4">
                   <div>
                     <h2 className="text-lg font-bold text-white font-sans">Reporte de Caja Global de Ingresos</h2>
                     <p className="text-xs text-slate-500 mt-0.5">
@@ -2277,23 +2644,23 @@ export default function App() {
                     </p>
                   </div>
 
-                  <div className="flex flex-wrap gap-3 items-end">
-                    <div className="field">
+                  <div className="flex flex-row gap-3 items-end w-full md:w-auto">
+                    <div className="field flex-1 md:flex-none">
                       <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1 block">Desde</label>
                       <input
                         type="date"
                         value={repDesde}
                         onChange={(e) => setRepDesde(e.target.value)}
-                        className="p-1 px-3 text-xs bg-black/40 border border-white/10 rounded-lg text-white focus:outline-none focus:border-indigo-500"
+                        className="p-1 px-3 py-1.5 text-xs bg-black/40 border border-white/10 rounded-lg text-white focus:outline-none focus:border-indigo-500 w-full"
                       />
                     </div>
-                    <div className="field">
+                    <div className="field flex-1 md:flex-none">
                       <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1 block">Hasta</label>
                       <input
                         type="date"
                         value={repHasta}
                         onChange={(e) => setRepHasta(e.target.value)}
-                        className="p-1 px-3 text-xs bg-black/40 border border-white/10 rounded-lg text-white focus:outline-none focus:border-indigo-500"
+                        className="p-1 px-3 py-1.5 text-xs bg-black/40 border border-white/10 rounded-lg text-white focus:outline-none focus:border-indigo-500 w-full"
                       />
                     </div>
                   </div>
@@ -3132,7 +3499,7 @@ export default function App() {
       {/* MODAL WINDOW 3: DETECTOR TICKET PRINTER DIALOG */}
       {isReceiptModalOpen && (
         <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-[#121215] border border-white/10 rounded-2xl w-full max-w-sm flex flex-col scale-100 shadow-2xl animate-in fade-in duration-200">
+          <div className="bg-[#121215] border border-white/10 rounded-2xl w-full max-w-sm flex flex-col scale-100 shadow-2xl animate-in fade-in duration-200 max-h-[92vh]">
             {/* Header */}
             <div className="p-4 border-b border-white/5 flex items-center justify-between">
               <span className="text-sm font-bold text-white uppercase tracking-wider flex items-center gap-1.5">
@@ -3221,7 +3588,7 @@ export default function App() {
             )}
 
             {/* Body displaying thermal output ticket natively */}
-            <div className="p-4 overflow-y-auto max-h-[50vh] flex items-center justify-center bg-black/40">
+            <div className="p-4 overflow-y-auto flex-1 flex items-center justify-center bg-black/40">
               <div id="receipt-ticket-print-panel" className="bg-white p-6 text-black" style={{ width: "75mm", minHeight: "100mm" }}>
                 <ReceiptTicket
                   cliente={activeReceiptClient || undefined}

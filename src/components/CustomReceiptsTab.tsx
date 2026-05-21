@@ -126,7 +126,7 @@ export const CustomReceiptsTab: React.FC<CustomReceiptsTabProps> = ({
 
   return (
     <div className="space-y-6">
-      <div className="flex justify-between items-center bg-white p-4 rounded-xl border border-[#cbc5bc] shadow-sm">
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center bg-white p-4 rounded-xl border border-[#cbc5bc] shadow-sm gap-3">
         <div>
           <h2 className="text-lg font-bold text-neutral-800">Recibios Personalizados por Productos y Servicios</h2>
           <p className="text-xs text-neutral-500">Emite facturas de mostrador o notas de remisión para accesorios, visitas técnicas o productos de alarma.</p>
